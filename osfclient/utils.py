@@ -29,7 +29,8 @@ def split_storage(path, default='osfstorage'):
     from the path. Otherwise the `default` storage provider is returned
     and the path is not modified.
     """
-    path = norm_remote_path(path)
+    if '\\' in path:
+        path = path.replace('\\', '/')
 
     for provider in KNOWN_PROVIDERS:
         if path.startswith(provider + '/'):
