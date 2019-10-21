@@ -270,6 +270,8 @@ def upload(args):
 
     project = osf.project(args.project)
     storage, remote_path = split_storage(args.destination)
+    if remote_path == '':
+        remote_path = os.path.split(args.source)[-1]
 
     store = project.storage(storage)
     if args.recursive:
