@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from .api import OSF
 from .exceptions import UnauthorizedException
-from .utils import norm_remote_path, split_storage, makedirs, checksum
+from .utils import norm_remote_path, split_storage, makedirs
 
 
 def config_from_file():
@@ -143,9 +143,6 @@ def clone(args):
     The output directory defaults to the current directory.
 
     If the project is private you need to specify a username.
-
-    If args.update is True, overwrite any existing local files only if local and
-    remote files differ.
     """
     osf = _setup_osf(args)
     project = osf.project(args.project)
@@ -156,17 +153,17 @@ def clone(args):
     with tqdm(unit='files') as pbar:
         for store in project.storages:
             prefix = os.path.join(output_dir, store.name)
-
+            prefix = prefix.replace(os.sep,'/')
             for file_ in store.files:
                 path = file_.path
+                path = path.replace(os.sep,'/')
                 if path.startswith('/'):
                     path = path[1:]
 
                 path = os.path.join(prefix, path)
-                if os.path.exists(path) and args.update:
-                    if checksum(path) == file_.hashes.get('md5'):
-                        continue
+                path = path.replace(os.sep,'/')
                 directory, _ = os.path.split(path)
+                directory = directory.replace(os.sep,'/')
                 makedirs(directory, exist_ok=True)
 
                 with open(path, "wb") as f:
@@ -186,22 +183,20 @@ def fetch(args):
     The local path defaults to the name of the remote file.
 
     If the project is private you need to specify a username.
-
-    If args.force is True, write local file even if that file already exists.
-    If args.force is False but args.update is True, overwrite an existing local
-    file only if local and remote files differ.
     """
     storage, remote_path = split_storage(args.remote)
 
     local_path = args.local
+    local_path = local_path.replace(os.sep,'/')
     if local_path is None:
         _, local_path = os.path.split(remote_path)
+        local_path = local_path.replace(os.sep,'/')
 
-    local_path_exists = os.path.exists(local_path)
-    if local_path_exists and not args.force and not args.update:
+    if os.path.exists(local_path) and not args.force:
         sys.exit("Local file %s already exists, not overwriting." % local_path)
 
     directory, _ = os.path.split(local_path)
+    directory = directory.replace(os.sep,'/')
     if directory:
         makedirs(directory, exist_ok=True)
 
@@ -211,10 +206,6 @@ def fetch(args):
     store = project.storage(storage)
     for file_ in store.files:
         if norm_remote_path(file_.path) == remote_path:
-            if local_path_exists and not args.force and args.update:
-                if file_.hashes.get('md5') == checksum(local_path):
-                    print("Local file %s already matches remote." % local_path)
-                    break
             with open(local_path, 'wb') as fp:
                 file_.write_to(fp)
 
@@ -236,10 +227,11 @@ def list_(args):
         prefix = store.name
         for file_ in store.files:
             path = file_.path
+            path = path.replace(os.sep,'/')
             if path.startswith('/'):
                 path = path[1:]
 
-            print(os.path.join(prefix, path))
+            print(os.path.join(prefix, path).replace(os.sep,'/'))
 
 
 @might_need_auth
@@ -270,8 +262,6 @@ def upload(args):
 
     project = osf.project(args.project)
     storage, remote_path = split_storage(args.destination)
-    if remote_path == '':
-        remote_path = os.path.split(args.source)[-1]
 
     store = project.storage(storage)
     if args.recursive:
@@ -283,20 +273,28 @@ def upload(args):
         _, dir_name = os.path.split(args.source)
 
         for root, _, files in os.walk(args.source):
-            subdir_path = os.path.relpath(root, args.source)
+            # these are extra subdirectories we have walked into since the root
+            # directory, have to clean off leading slashes from their name
+            # for path.join() to work later on
+            subdir_path = root.replace(args.source, '')
+            subdir_path = subdir_path.replace(os.sep,'/')
+            if subdir_path.startswith('/'):
+                subdir_path = subdir_path[1:]
+
             for fname in files:
                 local_path = os.path.join(root, fname)
+                local_path = local_path.replace(os.sep,'/')
                 with open(local_path, 'rb') as fp:
                     # build the remote path + fname
                     name = os.path.join(remote_path, dir_name, subdir_path,
                                         fname)
-                    store.create_file(name, fp, force=args.force,
-                                      update=args.update)
+                    store.create_file(name, fp, update=args.force)
 
     else:
+        if remote_path == '.' :
+            _ , remote_path = os.path.split(args.source)
         with open(args.source, 'rb') as fp:
-            store.create_file(remote_path, fp, force=args.force,
-                              update=args.update)
+            store.create_file(remote_path, fp, update=args.force)
 
 
 @might_need_auth
@@ -315,7 +313,7 @@ def remove(args):
     project = osf.project(args.project)
 
     storage, remote_path = split_storage(args.target)
-
+    remote_path = remote_path.replace(os.sep,'/')
     store = project.storage(storage)
     for f in store.files:
         if norm_remote_path(f.path) == remote_path:
